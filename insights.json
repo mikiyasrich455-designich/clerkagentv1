@@ -1,0 +1,192 @@
+{
+  "log": [
+    {
+      "query": "wireless noise cancelling headphones under $200",
+      "category": "Walmart - ORSNOG",
+      "matched": 6,
+      "products": [
+        "Hybrid Active Noise Cancelling Headphones, 60H Playtime Wireless Over-Ear Bluetooth 5.4 Headphones with 40mm Titanium Drivers, 45dB Adaptive Anc, Deep",
+        "Baseus Bass BH1 NC Adaptive ANC Wireless Headphones Ldac Hi-Res Audio",
+        "Hybrid ANC BT headphones, BT6.0, -56dB noise reduction (95%). 100H playtime, deep bass, memory foam earcups. For home, office, travel."
+      ],
+      "live": true,
+      "ts": 1788060950,
+      "id": "16"
+    },
+    {
+      "query": "best tecno phone for 500$+",
+      "category": "eBay - amsolutions_world",
+      "matched": 5,
+      "products": [
+        "Tecno Pova Curve 2 5G",
+        "Tecno Pova Slim 5G KM9 128GB 8GB RAM Gsm Unlocked Phone Mediatek Dimensity 6400 50MP",
+        "Tecno Spark Go 3 KN3 Aurora Purple 128GB 4GB RAM Gsm Unlocked Phone Unisoc T7250"
+      ],
+      "live": true,
+      "ts": 1788060894,
+      "id": "15"
+    },
+    {
+      "query": "best Lenovo pc under 500$",
+      "category": "Best Buy",
+      "matched": 6,
+      "products": [
+        "Lenovo - Refurbished Excellent - ThinkCentre M75q Gen 1 Tiny, AMD Ryzen 5 Pro 3400GE 3.3GHz, 16GB DDR4, 256GB NVMe SSD, Windows 11 Pro 64-bit - Black",
+        "Lenovo Ideacentre 08Akp10 SFF PC Ryzen 7 250 16gb RAM 1TB SSD W11p( Good), Gray",
+        "Lenovo - Refurbished Excellent - ThinkCentre M75q Tiny, AMD Ryzen 3 3200GE 3.3GHz, 16GB DDR4, 256GB NVMe SSD, Windows 11 Pro 64-bit - Black"
+      ],
+      "live": true,
+      "ts": 1788060835,
+      "id": "14"
+    },
+    {
+      "query": "find me Lenovo ThinkPad under 1000$",
+      "category": "Lenovo",
+      "matched": 6,
+      "products": [
+        "Lenovo 21t0000 ThinkPad E14 AMD G7",
+        "Lenovo ThinkPad L16 Gen 2 AMD Ryzen Pro Laptop",
+        "Lenovo ThinkPad E14 Gen 6 14\" AMD Ryzen"
+      ],
+      "live": true,
+      "ts": 1788060648,
+      "id": "13"
+    },
+    {
+      "query": "find me best top 3 phones under 500$",
+      "category": "Tops",
+      "matched": 5,
+      "products": [
+        "Zephyr Linen Shirt",
+        "Aria Linen Midi Dress",
+        "Echo Oversized Tee"
+      ],
+      "ts": 1788060566,
+      "id": "12"
+    },
+    {
+      "query": "I need a silk dress for a wedding under $150",
+      "category": "Dresses",
+      "matched": 5,
+      "products": [
+        "Aria Linen Midi Dress",
+        "Nova Silk Slip Dress",
+        "Halo Wrap Dress"
+      ],
+      "ts": 1788060532,
+      "id": "11"
+    },
+    {
+      "query": "find me Lenovo Thinkpad under 100$",
+      "category": "Bottoms",
+      "matched": 5,
+      "products": [
+        "Lumen Satin Midi Skirt",
+        "Aria Linen Midi Dress",
+        "Zephyr Linen Shirt"
+      ],
+      "ts": 1788060299,
+      "id": "10"
+    },
+    {
+      "query": "find me Lenovo Thinkpad under 100$",
+      "category": "Bottoms",
+      "matched": 5,
+      "products": [
+        "Lumen Satin Midi Skirt",
+        "Aria Linen Midi Dress",
+        "Zephyr Linen Shirt"
+      ],
+      "ts": 1788060279,
+      "id": "9"
+    },
+    {
+      "query": "find me Lenovo ThinkPad t495 price",
+      "category": "Bottoms",
+      "matched": 5,
+      "products": [
+        "Lumen Satin Midi Skirt",
+        "Aria Linen Midi Dress",
+        "Zephyr Linen Shirt"
+      ],
+      "ts": 1788060259,
+      "id": "8"
+    },
+    {
+      "query": "I need a silk dress for a wedding under $150",
+      "category": "Dresses",
+      "matched": 5,
+      "products": [
+        "Aria Linen Midi Dress",
+        "Nova Silk Slip Dress",
+        "Halo Wrap Dress"
+      ],
+      "ts": 1788060226,
+      "id": "7"
+    },
+    {
+      "query": "I need a silk dress for a wedding under $150",
+      "category": "Dresses",
+      "matched": 5,
+      "products": [
+        "Aria Linen Midi Dress",
+        "Nova Silk Slip Dress",
+        "Halo Wrap Dress"
+      ],
+      "ts": 1788059720,
+      "id": "6"
+    },
+    {
+      "query": "I need a silk dress for a wedding under $150",
+      "category": "Dresses",
+      "matched": 5,
+      "products": [
+        "Aria Linen Midi Dress",
+        "Nova Silk Slip Dress",
+        "Halo Wrap Dress"
+      ],
+      "ts": 1788059689,
+      "id": "5"
+    },
+    {
+      "id": "1",
+      "ts": 1756510000,
+      "query": "do you have a silk dress for a wedding",
+      "category": "Dresses",
+      "matched": 2,
+      "products": [
+        "Nova Silk Slip Dress"
+      ]
+    },
+    {
+      "id": "2",
+      "ts": 1756512000,
+      "query": "what size sneakers are in stock",
+      "category": "Shoes",
+      "matched": 1,
+      "products": [
+        "Peak White Sneaker"
+      ]
+    },
+    {
+      "id": "3",
+      "ts": 1756514000,
+      "query": "cashmere scarf under $60",
+      "category": "Accessories",
+      "matched": 1,
+      "products": [
+        "Lune Cashmere Scarf"
+      ]
+    },
+    {
+      "id": "4",
+      "ts": 1756516000,
+      "query": "wide leg trousers for office",
+      "category": "Bottoms",
+      "matched": 1,
+      "products": [
+        "Atlas Wide-Leg Trouser"
+      ]
+    }
+  ]
+}

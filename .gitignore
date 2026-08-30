@@ -1,0 +1,8 @@
+.env
+.env.local
+__pycache__/
+*.py[cod]
+.venv/
+.vercel/
+playground-*.png
+_verify_files.py
