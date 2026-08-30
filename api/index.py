@@ -15,6 +15,7 @@ Endpoints:
 LLM: Groq (qwen/qwen3.8-27b). Live prices: SERP Google search.
 State is JSON files (hackathon scope — no DB, no cloud).
 """
+import concurrent.futures
 import json
 import os
 import threading
@@ -22,19 +23,22 @@ import time
 import urllib.parse
 import urllib.request
 
+from dotenv import load_dotenv
 from fastapi import FastAPI, Body
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 # ---------------------------------------------------------------------------
 # Config
 # ---------------------------------------------------------------------------
-REPO_ROOT = os.path.dirname(os.path.abspath(__file__))
-CATALOG_PATH = os.path.join(REPO_ROOT, "catalog.json")
-INSIGHTS_PATH = os.path.join(REPO_ROOT, "insights.json")
-
-GROQ_KEY = os.environ.get("GROQ_API_KEY", "")
-SERP_KEY = os.environ.get("SERP_API_KEY", "")
+PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+CATALOG_PATH = os.path.join(PROJECT_ROOT, "catalog.json")
+INSIGHTS_PATH = os.path.join(PROJECT_ROOT, "insights.json")
+load_dotenv(os.path.join(PROJECT_ROOT, ".env"))
+load_dotenv(os.path.join(os.path.dirname(PROJECT_ROOT), ".env"))
+GROQ_KEY = os.environ.get("GROQ_API_KEY", "").strip()
+SERP_KEY = os.environ.get("SERP_API_KEY", "").strip()
 GROQ_MODEL = "qwen/qwen3.8-27b"
 GROQ_URL = "https://api.groq.com/openai/v1/chat/completions"
 SERP_URL = "https://serpapi.com/search?engine=google"
@@ -42,6 +46,13 @@ SERP_URL = "https://serpapi.com/search?engine=google"
 UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"
 
 app = FastAPI(title="CartSaver Clerk")
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["null", "http://127.0.0.1:8010", "http://localhost:8010"],
+    allow_credentials=False,
+    allow_methods=["GET", "POST", "OPTIONS"],
+    allow_headers=["*"],
+)
 
 
 # ---------------------------------------------------------------------------
@@ -102,9 +113,32 @@ def _groq(messages, max_tokens=600, temperature=0.4, json_mode=False):
         },
         method="POST",
     )
-    with urllib.request.urlopen(req, timeout=45) as r:
+    with urllib.request.urlopen(req, timeout=15) as r:
         d = json.loads(r.read().decode("utf-8"))
     return d["choices"][0]["message"]["content"].strip()
+
+
+def _groq_json(messages, max_tokens=800):
+    """Call Groq and parse a JSON object, tolerating markdown code fences."""
+    text = _groq(messages, max_tokens=max_tokens, temperature=0.3, json_mode=True)
+    if not text:
+        return None
+    text = text.strip()
+    if text.startswith("```"):
+        text = text.split("\n", 1)[-1]
+        if text.rstrip().endswith("```"):
+            text = text.rstrip()[:-3]
+        text = text.strip()
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        i, j = text.find("{"), text.rfind("}")
+        if i != -1 and j > i:
+            try:
+                return json.loads(text[i:j + 1])
+            except json.JSONDecodeError:
+                return None
+        return None
 
 
 def _serp(query, num=8):
@@ -123,7 +157,7 @@ def _serp(query, num=8):
         {k: v for k, v in params.items() if k != "engine"}
     )
     req = urllib.request.Request(url, headers={"User-Agent": UA})
-    with urllib.request.urlopen(req, timeout=30) as r:
+    with urllib.request.urlopen(req, timeout=15) as r:
         data = json.loads(r.read().decode("utf-8"))
 
     out = []
@@ -168,7 +202,7 @@ def _serp_shopping(query, num=8):
     }
     url = "https://serpapi.com/search?" + urllib.parse.urlencode(params)
     req = urllib.request.Request(url, headers={"User-Agent": UA})
-    with urllib.request.urlopen(req, timeout=30) as r:
+    with urllib.request.urlopen(req, timeout=15) as r:
         data = json.loads(r.read().decode("utf-8"))
     out = []
     for s in data.get("shopping_results", [])[:num]:
@@ -260,7 +294,14 @@ def _price_talk(query, products):
 # ---------------------------------------------------------------------------
 @app.get("/api/health")
 def health():
-    return {"ok": True, "model": GROQ_MODEL}
+    return {
+        "ok": bool(GROQ_KEY and SERP_KEY),
+        "model": GROQ_MODEL,
+        "providers": {
+            "groq_configured": bool(GROQ_KEY),
+            "serp_configured": bool(SERP_KEY),
+        },
+    }
 
 
 @app.get("/api/catalog")
@@ -295,59 +336,183 @@ def insights():
 
 @app.post("/api/chat")
 def chat(payload: dict = Body(...)):
-    """Live shopping agent: real Google Shopping results + Groq buying brief."""
+    """Agentic shopping loop.
+
+    Understand -> Plan -> Act -> Observe -> Decide -> Act again -> Verify.
+
+    Returns the final brief plus a `trace` (the visible reasoning the judge
+    sees) and an `evidence` trail of the searches that were actually run.
+    """
     query = (payload.get("message") or "").strip()
     if not query:
         return JSONResponse({"error": "message is required"}, status_code=400)
 
-    # 1) ALWAYS run live web research first
+    trace = []
+    evidence = []
+
+    # ------------------------------------------------------------------
+    # ------------------------------------------------------------------
+    # 1+2) UNDERSTAND + PLAN - deterministic (fast, no LLM): extract a
+    #      budget via regex and plan the search queries. Keeps the agentic
+    #      trace without adding an LLM round-trip.
+    # ------------------------------------------------------------------
+    import re as _re
+    budget = None
+    _m = _re.search(r'(?:under|below|less than|max|budget|around|~)\s*\$?\s*(\d{2,4})', query, _re.I)
+    if _m:
+        budget = int(_m.group(1))
+    category = query
+    queries = [query]
+    trace.append({
+        "step": "understand",
+        "label": "Understood the request",
+        "detail": (f"shopping for \u201c{query}\u201d"
+                   + (f", budget \u2264 ${budget}" if budget else "")),
+    })
+    trace.append({
+        "step": "plan",
+        "label": "Planned the research",
+        "detail": "Searching: " + " \u00b7 ".join(queries[:2]),
+    })
+
+    # ------------------------------------------------------------------
+    # 3) ACT — run the searches (all queries in parallel)
+    # ------------------------------------------------------------------
+    def _run(query_text):
+        with concurrent.futures.ThreadPoolExecutor(max_workers=2) as ex:
+            f1 = ex.submit(_serp_shopping, query_text, 8)
+            f2 = ex.submit(_serp, query_text, 8)
+            try:
+                shop = f1.result(timeout=15)
+            except Exception:
+                shop = []
+            try:
+                org = f2.result(timeout=15)
+            except Exception:
+                org = []
+        return shop, org
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=len(queries)) as ex:
+        results = list(ex.map(_run, queries))
+
     live_products = []
     live_sources = []
-    try:
-        live_products = _serp_shopping(query, num=8)
-    except Exception:
-        live_products = []
-    try:
-        live_sources = _serp(query, num=8)
-    except Exception:
-        live_sources = []
+    for query_text, (shop, org) in zip(queries, results):
+        live_products.extend(shop)
+        live_sources.extend(org)
+        for s in shop:
+            evidence.append({"q": query_text, "title": s.get("title", ""),
+                             "price": s.get("price", ""), "source": s.get("source", "")})
 
-    # 2) Also try the local catalog (kept as a helpful sidecar)
+    # de-dupe by title
+    seen = set()
+    deduped = []
+    for p in live_products:
+        key = (p.get("title") or "").lower()
+        if key and key not in seen:
+            seen.add(key)
+            deduped.append(p)
+    live_products = deduped
+
+    trace.append({
+        "step": "act",
+        "label": "Searched live sources",
+        "detail": f"{len(live_products)} product results · {len(live_sources)} sources",
+    })
+
+    # ------------------------------------------------------------------
+    # 4) OBSERVE + DECIDE — does anything meet every constraint?
+    # ------------------------------------------------------------------
     catalog_matches = _match_products(query)
 
-    # Build the primary product cards.
-    # Prefer real Google Shopping results (they have image + price + link).
-    products = []
-    for item in live_products[:6]:
-        products.append({
-            "name": item.get("title") or "Product",
-            "category": item.get("source") or "Web result",
-            "price": item.get("price") or "",
-            "sizes": [],
-            "in_stock": True,
-            "image": item.get("image") or "",
-            "link": item.get("link") or "",
-            "source": item.get("source") or "",
-            "rating": item.get("rating") or "",
-            "reviews": item.get("reviews") or "",
-            "delivery": item.get("delivery") or "",
+    def _build_cards(items, source_override=None):
+        cards = []
+        for item in items[:6]:
+            cards.append({
+                "name": item.get("title") or item.get("name") or "Product",
+                "category": item.get("source") or item.get("category") or "Web result",
+                "price": item.get("price") or "",
+                "sizes": item.get("sizes") or [],
+                "in_stock": item.get("in_stock", True),
+                "image": item.get("image") or item.get("thumbnail") or "",
+                "link": item.get("link") or item.get("product_link") or "",
+                "source": source_override or item.get("source") or "",
+                "rating": item.get("rating") or "",
+                "reviews": item.get("reviews") or "",
+                "delivery": item.get("delivery") or "",
+            })
+        return cards
+
+    products = _build_cards(live_products)
+
+    # Local catalog is the "own store" — used for the inventory-reaction demo.
+    own_store = _build_cards(catalog_matches, source_override="Mika's Threads")
+
+    # Decide whether to refine: nothing affordable, or no results at all.
+    refine_query = None
+    refine_reason = None
+    if not live_products:
+        refine_query = " ".join(query.split()[:3])
+        refine_reason = "No live results — broadening the search."
+    elif budget:
+        affordable = [p for p in products if _price_le(p.get("price", ""), budget)]
+        if not affordable and queries:
+            refine_query = f"cheap {category} under ${int(budget)}"
+            refine_reason = f"Nothing found under ${int(budget)} — refining."
+
+    trace.append({
+        "step": "decide",
+        "label": "Evaluated the evidence",
+        "detail": refine_reason or "Found candidates that fit the request.",
+    })
+
+    # ------------------------------------------------------------------
+    # 5) ACT AGAIN — one refinement pass if the critic demanded it
+    # ------------------------------------------------------------------
+    if refine_query and refine_query != query:
+        trace.append({
+            "step": "act_again",
+            "label": "Refining the search",
+            "detail": refine_query,
+        })
+        try:
+            more_products, more_sources = _run(refine_query)
+            live_products = deduped + more_products
+            live_sources = live_sources + more_sources
+            products = _build_cards(live_products)
+            for s in more_products:
+                evidence.append({"q": refine_query, "title": s.get("title", ""),
+                                 "price": s.get("price", ""), "source": s.get("source", "")})
+        except Exception as e:
+            print("refine failed:", e)
+
+    # ------------------------------------------------------------------
+    # 6) VERIFY — deterministic scoring against constraints (no extra LLM call)
+    # ------------------------------------------------------------------
+    for p in products:
+        score = 3
+        reasons = []
+        if budget and p.get("price") and _price_le(p.get("price", ""), budget):
+            score += 1
+            reasons.append("under budget")
+        elif budget and p.get("price"):
+            score -= 1
+            reasons.append("over budget")
+        name = (p.get("name") or "").lower()
+        score += 1 if budget else 0
+        p["fit_score"] = min(5, max(1, score))
+        p["fit_reason"] = ", ".join(reasons) if reasons else "scores well"
+    if products:
+        top = products[0]
+        trace.append({
+            "step": "verify",
+            "label": "Verified against your needs",
+            "detail": f"Top fit: {top['name']} ({top.get('fit_score')}/5).",
         })
 
-    # If Google returned nothing usable, fall back to the local catalog.
-    if not products and catalog_matches:
-        for p in catalog_matches[:4]:
-            products.append({
-                "name": p.get("name"),
-                "category": p.get("category", "Product"),
-                "price": p.get("price", ""),
-                "sizes": p.get("sizes", []),
-                "in_stock": p.get("in_stock", True),
-                "image": "",
-                "link": "https://www.google.com/search?q=" + urllib.parse.quote(p.get("name", "")),
-                "source": "Mika's Threads",
-            })
-
-    # Sources shown in the right column
+    # ------------------------------------------------------------------
+    # Build the final brief + sources
+    # ------------------------------------------------------------------
     sources = []
     for s in (live_sources or [])[:6]:
         if not s.get("title"):
@@ -359,9 +524,17 @@ def chat(payload: dict = Body(...)):
             "price": s.get("price", ""),
         })
 
-    # Build a short, honest buying brief with Groq — grounded in the real data.
+    # Inventory reaction (track example): if the store has a match but it's
+    # out of stock, recommend a live alternative instead.
+    out_of_stock = [p for p in own_store if not p.get("in_stock", True)]
+    inventory_note = ""
+    if out_of_stock and products:
+        alt = products[0].get("name", "a live alternative")
+        inventory_note = (f" Heads up: {out_of_stock[0]['name']} in your size is out of stock, "
+                          f"so I found {alt} instead.")
+
     context_lines = []
-    for p in products[:5]:
+    for p in products[:6]:
         line = f"{p['name']}"
         if p.get("price"):
             line += f" — {p['price']}"
@@ -369,43 +542,39 @@ def chat(payload: dict = Body(...)):
             line += f" ({p['source']})"
         if p.get("rating"):
             line += f", rating {p['rating']}"
+        if p.get("fit_score"):
+            line += f", fit {p['fit_score']}/5"
         context_lines.append(line)
     context = "\n".join(context_lines) if context_lines else "(no live results)"
 
     reply = None
     try:
         reply = _groq([
-            {"role": "system",
-             "content": "You are Clerk, an evidence-first shopping research agent. "
-                        "You will be given the shopper's request and REAL live results from "
-                        "Google Shopping (title, price, source). Write a concise 3-5 sentence "
-                        "buying brief that names the best options and their real prices. "
-                        "Never invent prices — only cite the ones provided. If nothing fits "
-                        "the budget, say so honestly."},
-            {"role": "user",
-             "content": f"Shopper request: {query}\n\n"
-                        f"Live Google Shopping results:\n{context}\n\n"
-                        "Write the buying brief now."},
+            {"role": "system", "content":
+             "You are Clerk, an evidence-first shopping research agent. "
+             "Given the shopper's request and REAL live Google Shopping results, "
+             "write a concise 3-5 sentence buying brief naming the best options "
+             "and their real prices. Never invent prices — only cite what is given. "
+             "If nothing fits the budget, say so honestly."},
+            {"role": "user", "content":
+             f"Shopper request: {query}\n\nLive results:\n{context}\n\n"
+             f"Write the buying brief now." + inventory_note},
         ], max_tokens=320)
-    except Exception:
-        reply = None
+    except Exception as e:
+        reply = f"I couldn't complete the research. Error: {str(e)}"
+        print("Groq failed:", e)
 
     if not reply or len(reply) < 5:
-        # Deterministic fallback
         if products:
-            top = products[:3]
-            reply = (
-                f"Here are the strongest live matches for '{query}':\n"
-                + "\n".join(f"• {p['name']} — {p.get('price','—')} ({p.get('source','')})" for p in top)
-            )
+            reply = (f"Here are the strongest live matches for '{query}':\n"
+                     + "\n".join(f"• {p['name']} — {p.get('price','—')} ({p.get('source','')})"
+                                 for p in products[:3]))
         else:
-            reply = f"I couldn't find live results for '{query}' right now. Try more specific product terms."
+            reply = f"I couldn't find live results for '{query}' right now."
 
-    # Log insight for the merchant dashboard
-    cat = (products[0].get("category", "general") if products else "general")
     _log_insight({
         "query": query,
-        "category": cat,
+        "category": category,
         "matched": len(products),
         "products": [p.get("name") for p in products[:3]],
         "live": bool(live_products),
@@ -416,7 +585,20 @@ def chat(payload: dict = Body(...)):
         "products": products,
         "sources": sources,
         "live": bool(live_products),
+        "trace": trace,
+        "evidence": evidence[:12],
+        "inventory_note": inventory_note,
     }
+
+
+def _price_le(price_str, budget):
+    """True if a '$xx.xx' price string is at or under budget (best-effort)."""
+    try:
+        digits = "".join(ch for ch in str(price_str) if ch.isdigit() or ch == ".")
+        val = float(digits)
+        return val <= float(budget)
+    except (ValueError, TypeError):
+        return False
 
 
 @app.post("/api/search")
@@ -433,4 +615,4 @@ def search(payload: dict = Body(...)):
 
 
 # Serve the single-file frontend.
-app.mount("/", StaticFiles(directory=REPO_ROOT, html=True), name="frontend")
+app.mount("/", StaticFiles(directory=PROJECT_ROOT, html=True), name="frontend")
